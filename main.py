@@ -113,23 +113,28 @@ def get_existing_urls(ws: gspread.Worksheet) -> Set[str]:
 
 def ensure_ae_header(ws: gspread.Worksheet) -> None:
     # A:ソース / B:タイトル / C:URL / D:投稿日 / E:掲載元
-    head = ws.row_values(1)
     target = ["ソース", "タイトル", "URL", "投稿日", "掲載元"]
-    if head != target:
-        ws.update('A1', [target])
+    # 必要列数を確保
+    if ws.col_count < len(target):
+        ws.add_cols(len(target) - ws.col_count)
+    ws.update('A1', [target])
 
 def ensure_body_comment_headers(ws: gspread.Worksheet, max_comments: int) -> None:
     """
-    1行目に F..O(本文1〜10), P(コメント数), Q..(コメント1〜N) を整える
+    1行目に F..O(本文1〜10), P(コメント数), Q..(コメント1〜N) を整える。
+    既存ヘッダーは読み取らず、“正を上書き” してズレや API 400 を根絶。
     """
-    current = ws.row_values(1)
     base = ["ソース", "タイトル", "URL", "投稿日", "掲載元"]
-    body_headers = [f"本文({i}ページ)" for i in range(1, 11)]  # F..O
+    body_headers = [f"本文({i}ページ)" for i in range(1, MAX_BODY_PAGES + 1)]  # F..O
     comments_count = ["コメント数"]  # P
     comment_headers = [f"コメント{i}" for i in range(1, max(1, max_comments) + 1)]  # Q..
     target = base + body_headers + comments_count + comment_headers
-    if current != target:
-        ws.update('A1', [target])
+
+    need_cols = len(target)
+    if ws.col_count < need_cols:
+        ws.add_cols(need_cols - ws.col_count)
+
+    ws.update('A1', [target])
 
 # ====== コピー元 → 出力先（A〜E列） ======
 def transfer_a_to_e(gc: gspread.Client, dest_ws: gspread.Worksheet) -> int:
@@ -258,7 +263,7 @@ def write_bodies_and_comments(ws: gspread.Worksheet) -> None:
             print(f"    ! Error: {e}")
             rows_data.append(([""] * MAX_BODY_PAGES) + [0])
 
-    # 列幅を最大コメント数に
+    # 行データの列数を “本文10 + コメント数1 + 最大コメント数” に揃える
     need_cols = MAX_BODY_PAGES + 1 + max_comments
     for i in range(len(rows_data)):
         if len(rows_data[i]) < need_cols:
@@ -267,7 +272,7 @@ def write_bodies_and_comments(ws: gspread.Worksheet) -> None:
     # ヘッダー整備（本文とコメントの列を含む完全版）
     ensure_body_comment_headers(ws, max_comments=max_comments)
 
-    # F2 から一括更新
+    # F2 から一括更新（必要なら列数も確保済み）
     if rows_data:
         ws.update("F2", rows_data)
         print(f"✅ 本文・コメントを書き込み: {len(rows_data)} 行（コメント列={max_comments}）")
